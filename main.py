@@ -100,9 +100,7 @@ async def ban_check_middleware(handler, event, data):
 
 dp.include_router(shop_router)
 # Подключение к базе данных
-import os
-os.makedirs('data', exist_ok=True)
-conn = sqlite3.connect('data/miner.db', check_same_thread=False)
+conn = sqlite3.connect('miner.db', check_same_thread=False)
 cursor = conn.cursor()
 
 from datetime import datetime, timedelta
@@ -13278,7 +13276,7 @@ async def use_promo(message: Message):
         await message.answer("❌ Произошла ошибка при обработке промокода")                                    
         
 
-conn = sqlite3.connect('data/miner.db', check_same_thread=False)
+conn = sqlite3.connect('miner.db', check_same_thread=False)
 cursor = conn.cursor()
 
 
