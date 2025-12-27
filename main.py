@@ -151,6 +151,16 @@ CREATE TABLE IF NOT EXISTS banned_users (
 )
 ''')
 
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS user_boosters (
+    user_id INTEGER,
+    booster_type TEXT,
+    until TEXT,
+    bonus REAL DEFAULT 0,
+    PRIMARY KEY (user_id, booster_type)
+)
+''')
+
 # Добавим после других CREATE TABLE
 cursor.execute('''
 CREATE TABLE IF NOT EXISTS promo_codes (
