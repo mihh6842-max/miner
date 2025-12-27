@@ -1446,8 +1446,8 @@ def give_farm_income_reward(user_id: int, hours: int) -> Tuple[bool, str]:
         
         farm_income = calculate_income(user_id) * 6 * hours
         new_btc = user[3] + farm_income
-        update_balance(user_id, btc=new_btc)
-        
+        update_balance(user_id, btc=new_btc, btc_delta=farm_income)
+
         return True, f"{hours} часов дохода фермы ({format_number(farm_income)} BTC)"
     except Exception as e:
         logger.error(f"Error giving farm income reward: {e}")
@@ -1470,8 +1470,8 @@ def give_business_income_reward(user_id: int, hours: int) -> Tuple[bool, str]:
         
         user = get_user(user_id)
         new_usd = user[2] + total_income
-        update_balance(user_id, usd=new_usd)
-        
+        update_balance(user_id, usd=new_usd, usd_delta=total_income)
+
         return True, f"{hours} часов дохода бизнесов (${format_number(total_income, True)})"
     except Exception as e:
         logger.error(f"Error giving business income reward: {e}")
@@ -1494,8 +1494,8 @@ def give_work_income_reward(user_id: int, hours: int) -> Tuple[bool, str]:
         total_income = current_job['reward'] * hours
         user = get_user(user_id)
         new_usd = user[2] + total_income
-        update_balance(user_id, usd=new_usd)
-        
+        update_balance(user_id, usd=new_usd, usd_delta=total_income)
+
         return True, f"{hours} часов дохода работы ({current_job['name']} - ${format_number(total_income, True)})"
     except Exception as e:
         logger.error(f"Error giving work income reward: {e}")
@@ -5569,28 +5569,30 @@ async def stats(message: Message):
         logger.error(f"Error in stats command: {e}")
         await message.answer("❌ Ошибка при получении статистики")
 
-def update_balance(user_id: int, usd: Optional[float] = None, btc: Optional[float] = None):
+def update_balance(user_id: int, usd: Optional[float] = None, btc: Optional[float] = None, usd_delta: Optional[float] = None, btc_delta: Optional[float] = None):
     try:
         if usd is not None:
             cursor.execute('UPDATE users SET usd_balance = ? WHERE user_id = ?', (usd, user_id))
-            # Обновляем статистику заработанных USD
-            if usd > 0:  # Если это начисление, а не списание
+            # Обновляем статистику заработанных USD (используем дельту если передана)
+            delta = usd_delta if usd_delta is not None else usd
+            if delta > 0:
                 cursor.execute('''
-                UPDATE user_work_stats 
+                UPDATE user_work_stats
                 SET total_usd_earned = total_usd_earned + ?
                 WHERE user_id = ?
-                ''', (usd, user_id))
-        
+                ''', (delta, user_id))
+
         if btc is not None:
             cursor.execute('UPDATE users SET btc_balance = ? WHERE user_id = ?', (btc, user_id))
-            # Обновляем статистику заработанных BTC
-            if btc > 0:  # Если это начисление, а не списание
+            # Обновляем статистику заработанных BTC (используем дельту если передана)
+            delta = btc_delta if btc_delta is not None else btc
+            if delta > 0:
                 cursor.execute('''
-                UPDATE user_work_stats 
+                UPDATE user_work_stats
                 SET total_btc_earned = total_btc_earned + ?
                 WHERE user_id = ?
-                ''', (btc, user_id))
-        
+                ''', (delta, user_id))
+
         conn.commit()
     except sqlite3.Error as e:
         logger.error(f"Error updating balance: {e}")
@@ -7026,8 +7028,8 @@ def give_referral_reward(referrer_id: int, referred_id: int) -> bool:
         if user:
             farm_income = calculate_income(referrer_id) * 6 * 3  # 6 интервалов по 10 минут в часе * 3 часа
             new_btc = user[3] + farm_income
-            update_balance(referrer_id, btc=new_btc)
-            
+            update_balance(referrer_id, btc=new_btc, btc_delta=farm_income)
+
             # Отправляем уведомление рефереру
             asyncio.create_task(send_referral_reward_notification(referrer_id, referred_id, farm_income))
         
@@ -9884,7 +9886,7 @@ def generate_daily_bonus(user_id: int) -> Tuple[str, str]:
             base_income = calculate_income(user_id)
             btc_amount = base_income * multiplier
             new_btc = user[3] + btc_amount
-            update_balance(user_id, btc=new_btc)
+            update_balance(user_id, btc=new_btc, btc_delta=btc_amount)
             
             return 'btc', f"{format_number(btc_amount)} BTC (x{multiplier} от дохода)"
             
@@ -16452,7 +16454,9 @@ async def auto_rembp_job():
         cursor.execute('SELECT user_id FROM users')
         users = cursor.fetchall()
 
-        for (user_id,) in users:
+        # Обрабатываем пользователей пакетами по 100 для избежания переполнения БД
+        batch_size = 100
+        for idx, (user_id,) in enumerate(users):
             # Проверяем текущие данные в user_bp_progress
             cursor.execute('SELECT current_level, current_exp FROM user_bp_progress WHERE user_id = ?', (user_id,))
             result = cursor.fetchone()
@@ -16515,6 +16519,11 @@ async def auto_rembp_job():
                         WHERE user_id = ?
                     ''', (task['id'], now.isoformat(), user_id))
                     logger.info(f"Updated task for user {user_id}, level remains {old_level}, exp remains {old_exp}, new task_id: {task['id']}")
+
+            # Делаем commit после каждых batch_size пользователей
+            if (idx + 1) % batch_size == 0:
+                conn.commit()
+                logger.info(f"Committed batch {idx + 1}/{len(users)}")
 
         conn.commit()
         
