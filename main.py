@@ -68,6 +68,36 @@ API_TOKEN = "8022498920:AAHwijIPn3LnxQIys5PETOCyCEUCBJhollA" # original
 
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
+
+# ===== MIDDLEWARE ДЛЯ ПРОВЕРКИ БАНА =====
+@dp.update.outer_middleware()
+async def ban_check_middleware(handler, event, data):
+    """Middleware для проверки глобального бана пользователя"""
+    user_id = None
+    if hasattr(event, 'from_user') and event.from_user:
+        user_id = event.from_user.id
+    elif hasattr(event, 'message') and event.message and hasattr(event.message, 'from_user'):
+        user_id = event.message.from_user.id
+
+    if user_id and user_id not in ADMINS:
+        is_banned, reason = check_ban(user_id)
+        if is_banned:
+            try:
+                if hasattr(event, 'answer'):
+                    await event.answer(
+                        f'🚫 Вы заблокированы\nПричина: {reason}\n\nВы не можете использовать бота.',
+                        show_alert=True
+                    )
+                elif hasattr(event, 'message'):
+                    await event.message.answer(
+                        f'🚫 Вы заблокированы\nПричина: {reason}\n\nВы не можете использовать бота.'
+                    )
+            except:
+                pass
+            return
+
+    return await handler(event, data)
+
 dp.include_router(shop_router)
 # Подключение к базе данных
 conn = sqlite3.connect('miner.db', check_same_thread=False)
@@ -109,6 +139,15 @@ CREATE TABLE IF NOT EXISTS antivirus_users (
     user_id INTEGER PRIMARY KEY,
     antivirus_until TEXT NOT NULL,
     created_at TEXT DEFAULT CURRENT_TIMESTAMP
+)
+''')
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS banned_users (
+    user_id INTEGER PRIMARY KEY,
+    banned_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    banned_by INTEGER,
+    reason TEXT DEFAULT 'Глобальный бан'
 )
 ''')
 
@@ -587,6 +626,113 @@ async def grant_auto_command(message: Message):
             
     except Exception as e:
         await message.answer("❌ Ошибка формата")
+
+@dp.message(Command("ban"))
+async def ban_command(message: Message):
+    """Глобальный бан пользователя (только для админов)"""
+    if message.from_user.id not in ADMINS:
+        await message.answer("❌ Нет прав")
+        return
+
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            await message.answer('⚠️ Используйте: /ban (ID пользователя) [причина]')
+            return
+
+        user_id = int(args[1])
+        reason = ' '.join(args[2:]) if len(args) > 2 else "Глобальный бан"
+
+        if user_id in ADMINS:
+            await message.answer('❌ Нельзя забанить администратора')
+            return
+
+        # Проверяем, не забанен ли уже
+        cursor.execute('SELECT user_id FROM banned_users WHERE user_id = ?', (user_id,))
+        if cursor.fetchone():
+            await message.answer('⚠️ Пользователь уже забанен')
+            return
+
+        # Баним пользователя
+        cursor.execute(
+            'INSERT INTO banned_users (user_id, banned_by, reason) VALUES (?, ?, ?)',
+            (user_id, message.from_user.id, reason)
+        )
+
+        # Обнуляем все данные пользователя
+        cursor.execute('DELETE FROM users WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM user_cards WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM user_businesses WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM user_work_stats WHERE user_id = ?', (user_id,))
+        cursor.execute('DELETE FROM user_bp_progress WHERE user_id = ?', (user_id,))
+        conn.commit()
+
+        await message.answer(
+            f'✅ Пользователь {user_id} забанен\n'
+            f'Причина: {reason}\n'
+            f'Все данные удалены'
+        )
+
+        # Уведомляем пользователя
+        try:
+            await bot.send_message(
+                user_id,
+                f'🚫 Вы заблокированы\n'
+                f'Причина: {reason}\n\n'
+                f'Все ваши данные удалены. Вы не можете использовать бота.'
+            )
+        except:
+            pass
+
+    except ValueError:
+        await message.answer('❌ ID должен быть числом')
+    except Exception as e:
+        logger.error(f"Error in ban_command: {e}")
+        await message.answer(f'❌ Ошибка: {str(e)}')
+
+@dp.message(Command("unban"))
+async def unban_command(message: Message):
+    """Разбан пользователя (только для админов)"""
+    if message.from_user.id not in ADMINS:
+        await message.answer("❌ Нет прав")
+        return
+
+    try:
+        args = message.text.split()
+        if len(args) < 2:
+            await message.answer('⚠️ Используйте: /unban (ID пользователя)')
+            return
+
+        user_id = int(args[1])
+
+        # Проверяем, забанен ли пользователь
+        cursor.execute('SELECT user_id, reason FROM banned_users WHERE user_id = ?', (user_id,))
+        if not cursor.fetchone():
+            await message.answer('⚠️ Пользователь не забанен')
+            return
+
+        # Разбаниваем
+        cursor.execute('DELETE FROM banned_users WHERE user_id = ?', (user_id,))
+        conn.commit()
+
+        await message.answer(f'✅ Пользователь {user_id} разбанен')
+
+        # Уведомляем пользователя
+        try:
+            await bot.send_message(
+                user_id,
+                '✅ Вы разблокированы!\n'
+                'Теперь вы можете снова использовать бота.\n'
+                'Начните с /start'
+            )
+        except:
+            pass
+
+    except ValueError:
+        await message.answer('❌ ID должен быть числом')
+    except Exception as e:
+        logger.error(f"Error in unban_command: {e}")
+        await message.answer(f'❌ Ошибка: {str(e)}')
 
 # Функции автоматических операций
 async def process_auto_taxes(user_id: int) -> bool:
@@ -5597,6 +5743,17 @@ def update_balance(user_id: int, usd: Optional[float] = None, btc: Optional[floa
     except sqlite3.Error as e:
         logger.error(f"Error updating balance: {e}")
         conn.rollback()
+
+def check_ban(user_id: int) -> tuple[bool, str]:
+    """Проверка на глобальный бан. Возвращает (забанен?, причина)"""
+    try:
+        cursor.execute('SELECT reason FROM banned_users WHERE user_id = ?', (user_id,))
+        result = cursor.fetchone()
+        if result:
+            return True, result[0]
+        return False, ""
+    except:
+        return False, ""
 
 def get_user_cards(user_id: int) -> Tuple[List[Tuple[int, int]], int]:
     try:
