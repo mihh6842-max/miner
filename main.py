@@ -16865,7 +16865,7 @@ async def main():
     # Запуск планировщика
     scheduler.start()
     initialize_items()
-    start_captcha_cleaner()
+    asyncio.create_task(start_captcha_cleaner())
     # Инициализация систем
     initialize_tax_system()  # ✅ ДОБАВЛЕНО: Инициализация таблиц налогов
     initialize_fund_system()  # ✅ ДОБАВЛЕНО: Инициализация системы сборов
