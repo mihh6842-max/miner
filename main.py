@@ -100,9 +100,23 @@ async def ban_check_middleware(handler, event, data):
 
 dp.include_router(shop_router)
 
+# Проверка целостности БД
+def check_db_integrity(path):
+    """Проверяет, что БД не повреждена"""
+    try:
+        test_conn = sqlite3.connect(path)
+        test_cursor = test_conn.cursor()
+        test_cursor.execute("PRAGMA integrity_check")
+        result = test_cursor.fetchone()
+        test_conn.close()
+        return result[0] == 'ok'
+    except Exception as e:
+        logger.error(f"БД повреждена {path}: {e}")
+        return False
+
 # Поиск базы данных в разных местах
 def find_database():
-    """Ищет miner.db в разных папках, возвращает путь к существующей БД"""
+    """Ищет miner.db в разных папках, возвращает путь к существующей и рабочей БД"""
     script_dir = os.path.dirname(os.path.abspath(__file__))
 
     # Места для поиска (приоритет)
@@ -118,14 +132,17 @@ def find_database():
     for path in search_paths:
         normalized = os.path.normpath(path)
         if os.path.exists(normalized):
-            logger.info(f"База данных найдена: {normalized}")
-            return normalized
+            if check_db_integrity(normalized):
+                logger.info(f"База данных найдена и исправна: {normalized}")
+                return normalized
+            else:
+                logger.warning(f"БД повреждена, пропускаем: {normalized}")
 
-    # Если не найдена - создаем в data/ рядом со скриптом
+    # Если не найдена рабочая - создаем в data/ рядом со скриптом
     data_dir = os.path.join(script_dir, 'data')
     os.makedirs(data_dir, exist_ok=True)
     new_path = os.path.join(data_dir, 'miner.db')
-    logger.info(f"База данных не найдена, будет создана: {new_path}")
+    logger.info(f"Рабочая БД не найдена, будет создана: {new_path}")
     return new_path
 
 DB_PATH = find_database()
