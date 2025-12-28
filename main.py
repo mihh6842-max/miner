@@ -99,8 +99,40 @@ async def ban_check_middleware(handler, event, data):
     return await handler(event, data)
 
 dp.include_router(shop_router)
+
+# Поиск базы данных в разных местах
+def find_database():
+    """Ищет miner.db в разных папках, возвращает путь к существующей БД"""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Места для поиска (приоритет)
+    search_paths = [
+        os.path.join(script_dir, 'data', 'miner.db'),           # ./data/miner.db
+        os.path.join(script_dir, '..', 'data', 'miner.db'),     # ../data/miner.db
+        os.path.join(script_dir, 'miner.db'),                    # ./miner.db
+        os.path.join(script_dir, '..', 'miner.db'),              # ../miner.db
+        '/app/data/miner.db',                                     # для хостинга
+        '/data/miner.db',                                         # для хостинга
+    ]
+
+    for path in search_paths:
+        normalized = os.path.normpath(path)
+        if os.path.exists(normalized):
+            logger.info(f"База данных найдена: {normalized}")
+            return normalized
+
+    # Если не найдена - создаем в data/ рядом со скриптом
+    data_dir = os.path.join(script_dir, 'data')
+    os.makedirs(data_dir, exist_ok=True)
+    new_path = os.path.join(data_dir, 'miner.db')
+    logger.info(f"База данных не найдена, будет создана: {new_path}")
+    return new_path
+
+DB_PATH = find_database()
+logger.info(f"Используется БД: {DB_PATH}")
+
 # Подключение к базе данных
-conn = sqlite3.connect('miner.db', check_same_thread=False)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 from datetime import datetime, timedelta
@@ -13273,10 +13305,11 @@ async def use_promo(message: Message):
         await message.answer("❌ Неверный формат. Используйте: /promo [код]")
     except Exception as e:
         logger.error(f"Error in promo command: {e}")
-        await message.answer("❌ Произошла ошибка при обработке промокода")                                    
-        
+        await message.answer("❌ Произошла ошибка при обработке промокода")
 
-conn = sqlite3.connect('miner.db', check_same_thread=False)
+
+# Переподключение к БД (используем тот же путь)
+conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cursor = conn.cursor()
 
 
