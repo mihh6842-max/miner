@@ -142,6 +142,15 @@ def find_database():
     data_dir = os.path.join(script_dir, 'data')
     os.makedirs(data_dir, exist_ok=True)
     new_path = os.path.join(data_dir, 'miner.db')
+
+    # Удаляем повреждённую БД если она там есть
+    if os.path.exists(new_path):
+        try:
+            os.remove(new_path)
+            logger.info(f"Удалена повреждённая БД: {new_path}")
+        except Exception as e:
+            logger.error(f"Не удалось удалить повреждённую БД: {e}")
+
     logger.info(f"Рабочая БД не найдена, будет создана: {new_path}")
     return new_path
 
@@ -6924,16 +6933,39 @@ async def distribute_premium_rewards():
 
         # Формируем текст для публикации
         if chat_report:
-            publication_text = "🏆 Топ чатов этой недели:\n\n" + "\n".join(chat_report)
+            publication_text = "🏆 <b>Топ чатов этой недели:</b>\n\n" + "\n".join(chat_report)
+            publication_text += "\n\n⏰ <b>Следующие итоги:</b> Воскресенье, 18:00 по МСК"
 
-            # Отправляем админам текст для публикации
+            # Публикуем в основной канал
+            try:
+                await bot.send_message(
+                    -1002780167646,  # CHANNEL_ID
+                    publication_text,
+                    parse_mode='HTML'
+                )
+                logger.info("Weekly results posted to main channel")
+            except Exception as e:
+                logger.error(f"Failed to post weekly results to main channel: {e}")
+
+            # Публикуем в PCClub_News
+            try:
+                await bot.send_message(
+                    "@PCClub_News",
+                    publication_text,
+                    parse_mode='HTML'
+                )
+                logger.info("Weekly results posted to @PCClub_News")
+            except Exception as e:
+                logger.error(f"Failed to post weekly results to @PCClub_News: {e}")
+
+            # Отправляем админам уведомление
             for admin_id in ADMINS:
                 try:
                     await bot.send_message(
                         admin_id,
                         "🏆 <b>АВТОМАТИЧЕСКИЙ ТОП ЧАТОВ</b>\n\n"
-                        "Премиум выдан!\n"
-                        "Скопируй и опубликуй этот текст:\n\n"
+                        "✅ Премиум выдан!\n"
+                        "✅ Опубликовано в каналы!\n\n"
                         "━━━━━━━━━━━━━━━\n\n" +
                         publication_text,
                         parse_mode='HTML'
